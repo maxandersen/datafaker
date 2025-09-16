@@ -66,11 +66,21 @@ public class Text extends AbstractProvider<BaseProviders> {
         return text(minimumLength, maximumLength, includeUppercase, includeSpecial, false);
     }
 
-    public String text(int minimumLength, int maximumLength, boolean includeUppercase, boolean includeSpecial, boolean includeDigit) {
+    public String text(int requestedMinimumLength, int maximumLength, boolean includeUppercase, boolean includeSpecial, boolean includeDigit) {
+        if (requestedMinimumLength > maximumLength) {
+            throw new IllegalArgumentException("Min length (%s) should not be greater than max length (%s)".formatted(
+                requestedMinimumLength, maximumLength));
+        }
+
+        final int minimumLength = Math.max(requestedMinimumLength, min(includeUppercase) + min(includeSpecial) + min(includeDigit));
+        if (minimumLength > maximumLength) {
+            throw new IllegalArgumentException("Minimum number of required characters (%s) should not be greater than max length (%s)".formatted(
+                minimumLength, maximumLength));
+        }
+
         final int len = faker.number().numberBetween(minimumLength, maximumLength + 1);
         TextConfigPojo pojo = new TextConfigPojo(len, includeUppercase, includeSpecial, includeDigit);
-        Text.TextRuleConfig config = configMap.get(pojo);
-        if (config == null) {
+        Text.TextRuleConfig config = configMap.computeIfAbsent(pojo, (x) -> {
             TextSymbolsBuilder builder =
                 TextSymbolsBuilder.builder()
                     .with(Text.EN_LOWERCASE);
@@ -78,11 +88,14 @@ public class Text extends AbstractProvider<BaseProviders> {
             if (includeSpecial) builder = builder.with(Text.DEFAULT_SPECIAL, 1);
             if (includeDigit) builder = builder.with(Text.DIGITS, 1);
 
-            config = builder.len(len).build();
-            configMap.putIfAbsent(pojo, config);
-        }
+            return builder.len(len).throwIfLengthSmall(true).build();
+        });
 
         return text(config);
+    }
+
+    private static int min(boolean requireSomeKindOfSymbols) {
+        return requireSomeKindOfSymbols ? 1 : 0;
     }
 
     public static final String EN_LOWERCASE = "abcdefghijklmnopqrstuvwxyz";
@@ -102,6 +115,9 @@ public class Text extends AbstractProvider<BaseProviders> {
         private final int numberOfRequiredSymbols;
 
         private TextRuleConfig(int fixedNumberOfCharacters, Map<String, Integer> map, int numberOfRequiredSymbols) {
+            assert numberOfRequiredSymbols >= 0;
+            assert fixedNumberOfCharacters >= numberOfRequiredSymbols;
+
             this.fixedNumberOfCharacters = fixedNumberOfCharacters;
             this.numberOfRequiredSymbols = numberOfRequiredSymbols;
             this.textKeys = new char[map.size()][];
@@ -200,10 +216,10 @@ public class Text extends AbstractProvider<BaseProviders> {
      * {@code final String customSpecialSymbols = "!@#$%^*;'][{}";}.
      */
     public String text(TextRuleConfig textRuleConfig) {
-        final int fixedNumberOfCharacters = textRuleConfig.getFixedNumberOfCharacters();
+        int fixedNumberOfCharacters = textRuleConfig.getFixedNumberOfCharacters();
         final int numberOfRequiredSymbols = textRuleConfig.getNumberOfRequiredSymbols();
         if (fixedNumberOfCharacters < numberOfRequiredSymbols) {
-            return "";
+            fixedNumberOfCharacters = numberOfRequiredSymbols;
         }
         char[] buffer = new char[fixedNumberOfCharacters];
         int idx = 0;
